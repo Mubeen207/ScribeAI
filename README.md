@@ -1,2 +1,34 @@
 # ScribeAI
-ScribeAI is an AI-powered app that transcribes any audio &amp; video file. It auto-extracts audio from video, handles long files with 15-min smart chunking via Gemini AI, and lets you view, print, and export transcripts as PDF, TXT, or Word. Secure with auto file cleanup.
+
+ScribeAI is a Next.js transcription app for standard audio and video files. It extracts audio from video uploads, splits long audio into 15-minute chunks, sends each chunk to Gemini for transcription, and lets you export the final transcript as PDF, TXT, DOCX, or print it.
+
+## Setup
+
+1. Install dependencies:
+
+   ```bash
+   npm install
+   ```
+
+2. Create a local environment file:
+
+   ```bash
+   cp .env.example .env.local
+   ```
+
+3. Add your Gemini API key to `.env.local`:
+
+   ```bash
+   GEMINI_API_KEY=your_key_here
+   ```
+
+4. Start the development server:
+
+   ```bash
+   npm run dev
+   ```
+
+## Validation
+
+- `npm run lint`
+- `npm run build`
