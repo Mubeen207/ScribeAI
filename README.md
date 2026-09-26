@@ -20,6 +20,8 @@ ScribeAI is a Next.js transcription app for standard audio and video files. It e
 
    ```bash
    GEMINI_API_KEY=your_key_here
+   # Optional
+   GEMINI_MODEL=gemini-2.5-flash
    ```
 
 4. Start the development server:

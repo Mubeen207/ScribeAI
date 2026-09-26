@@ -136,8 +136,27 @@ export default function Home() {
 
   function handleDownloadPdf() {
     const pdf = new jsPDF();
-    const lines = pdf.splitTextToSize(transcript, 180);
-    pdf.text(lines, 15, 20);
+    const lines = pdf.splitTextToSize(transcript, 180) as string[];
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const lineHeight = 8;
+    const topMargin = 20;
+    const bottomMargin = 20;
+    let cursorY = topMargin;
+
+    lines.forEach((line: string, index: number) => {
+      if (cursorY > pageHeight - bottomMargin) {
+        pdf.addPage();
+        cursorY = topMargin;
+      }
+
+      pdf.text(line, 15, cursorY);
+      cursorY += lineHeight;
+
+      if (index === lines.length - 1) {
+        cursorY += lineHeight;
+      }
+    });
+
     pdf.save(`${downloadBaseName || "transcript"}.pdf`);
   }
 
