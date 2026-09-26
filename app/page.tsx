@@ -147,7 +147,7 @@ export default function Home() {
     let cursorY = topMargin;
 
     lines.forEach((line: string, index: number) => {
-      if (cursorY > pageHeight - bottomMargin) {
+      if (cursorY + lineHeight > pageHeight - bottomMargin) {
         pdf.addPage();
         cursorY = topMargin;
       }
@@ -230,7 +230,11 @@ export default function Home() {
             </button>
           </form>
 
-          {error ? <p className={styles.error}>{error}</p> : null}
+          {error ? (
+            <p className={styles.error} role="alert">
+              {error}
+            </p>
+          ) : null}
         </section>
 
         <section className={styles.card}>
