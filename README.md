@@ -16,7 +16,10 @@ ScribeAI is a Next.js transcription app for standard audio and video files. It e
    cp .env.example .env.local
    ```
 
-3. Add your Gemini API key to `.env.local`:
+   On Windows or any shell where `cp` is unavailable, create `.env.local`
+   manually and paste the same variables shown below.
+
+3. Add your Gemini API settings to `.env.local`:
 
    ```bash
    GEMINI_API_KEY=your_key_here

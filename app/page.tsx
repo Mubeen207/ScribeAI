@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Document, Packer, Paragraph } from "docx";
+import { Document, Packer, Paragraph, TextRun } from "docx";
 import { jsPDF } from "jspdf";
 import styles from "./page.module.css";
 
@@ -36,7 +36,7 @@ function downloadBlob(blob: Blob, filename: string) {
   document.body.appendChild(link);
   link.click();
   link.remove();
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 function escapeHtml(value: string) {
@@ -119,10 +119,13 @@ export default function Home() {
       sections: [
         {
           properties: {},
-          children: transcript
-            .split(/\n{2,}/)
-            .filter(Boolean)
-            .map((paragraph) => new Paragraph(paragraph)),
+          children: transcript.split("\n").map((line) =>
+            line
+              ? new Paragraph({
+                  children: [new TextRun(line)],
+                })
+              : new Paragraph(""),
+          ),
         },
       ],
     });
@@ -180,10 +183,10 @@ export default function Home() {
       </html>
     `;
 
-    printWindow.onload = () => {
+    printWindow.addEventListener("load", () => {
       printWindow.focus();
       printWindow.print();
-    };
+    });
 
     printWindow.document.write(markup);
     printWindow.document.close();

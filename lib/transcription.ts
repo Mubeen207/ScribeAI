@@ -49,6 +49,7 @@ const AUDIO_MIME_PREFIXES = ["audio/"];
 const VIDEO_MIME_PREFIXES = ["video/"];
 
 type MediaKind = "audio" | "video";
+type MediaHint = MediaKind | "ambiguous";
 
 export class ValidationError extends Error {}
 
@@ -65,24 +66,61 @@ function isMimeMatch(type: string, prefixes: string[]) {
   return prefixes.some((prefix) => type.startsWith(prefix));
 }
 
-function isAllowedUpload(fileName: string, mimeType: string) {
+function getExtensionHint(fileName: string): MediaHint | null {
   const extension = path.extname(fileName).toLowerCase();
 
-  if (
-    AUDIO_EXTENSIONS.has(extension) ||
-    (mimeType && isMimeMatch(mimeType, AUDIO_MIME_PREFIXES))
-  ) {
-    return true;
+  if (AUDIO_EXTENSIONS.has(extension) && VIDEO_EXTENSIONS.has(extension)) {
+    return "ambiguous";
+  }
+
+  if (AUDIO_EXTENSIONS.has(extension)) {
+    return "audio";
+  }
+
+  if (VIDEO_EXTENSIONS.has(extension)) {
+    return "video";
+  }
+
+  return null;
+}
+
+function getMimeHint(mimeType: string): MediaHint | null {
+  if (!mimeType) {
+    return null;
+  }
+
+  if (isMimeMatch(mimeType, AUDIO_MIME_PREFIXES)) {
+    return "audio";
+  }
+
+  if (isMimeMatch(mimeType, VIDEO_MIME_PREFIXES)) {
+    return "video";
+  }
+
+  return null;
+}
+
+function isAllowedUpload(fileName: string, mimeType: string) {
+  const extensionHint = getExtensionHint(fileName);
+  const mimeHint = getMimeHint(mimeType);
+
+  if (!extensionHint && !mimeHint) {
+    return false;
   }
 
   if (
-    VIDEO_EXTENSIONS.has(extension) ||
-    (mimeType && isMimeMatch(mimeType, VIDEO_MIME_PREFIXES))
+    extensionHint &&
+    mimeHint &&
+    extensionHint !== "ambiguous" &&
+    mimeHint !== "ambiguous" &&
+    extensionHint !== mimeHint
   ) {
-    return true;
+    throw new ValidationError(
+      "The uploaded file extension does not match its media type.",
+    );
   }
 
-  return false;
+  return true;
 }
 
 function probe(filePath: string) {
