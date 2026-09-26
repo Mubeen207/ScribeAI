@@ -65,24 +65,24 @@ function isMimeMatch(type: string, prefixes: string[]) {
   return prefixes.some((prefix) => type.startsWith(prefix));
 }
 
-function getMediaKind(fileName: string, mimeType: string): MediaKind | null {
+function isAllowedUpload(fileName: string, mimeType: string) {
   const extension = path.extname(fileName).toLowerCase();
 
   if (
     AUDIO_EXTENSIONS.has(extension) ||
     (mimeType && isMimeMatch(mimeType, AUDIO_MIME_PREFIXES))
   ) {
-    return "audio";
+    return true;
   }
 
   if (
     VIDEO_EXTENSIONS.has(extension) ||
     (mimeType && isMimeMatch(mimeType, VIDEO_MIME_PREFIXES))
   ) {
-    return "video";
+    return true;
   }
 
-  return null;
+  return false;
 }
 
 function probe(filePath: string) {
@@ -127,6 +127,25 @@ async function validateUploadedMedia(filePath: string, kind: MediaKind) {
       throw new ValidationError("The uploaded video does not contain an audio track.");
     }
   }
+}
+
+async function detectMediaKind(filePath: string) {
+  const metadata = await probe(filePath);
+  const streams = metadata.streams ?? [];
+  const hasAudio = streams.some((stream) => stream.codec_type === "audio");
+  const hasVideo = streams.some((stream) => stream.codec_type === "video");
+
+  if (hasVideo) {
+    return "video" as const;
+  }
+
+  if (hasAudio) {
+    return "audio" as const;
+  }
+
+  throw new ValidationError(
+    "The uploaded file does not contain a valid audio or video stream.",
+  );
 }
 
 async function createTranscriptionAudio(
@@ -206,9 +225,7 @@ async function transcribeAudioSegment(model: ReturnType<GoogleGenerativeAI["getG
 }
 
 export async function transcribeUpload(file: File) {
-  const mediaKind = getMediaKind(file.name, file.type);
-
-  if (!mediaKind) {
+  if (!isAllowedUpload(file.name, file.type)) {
     throw new ValidationError(
       "Unsupported file type. Upload a standard audio or video file.",
     );
@@ -223,10 +240,12 @@ export async function transcribeUpload(file: File) {
   const tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "scribeai-"));
 
   try {
-    const uploadedPath = path.join(tempDirectory, `${randomUUID()}-${file.name}`);
+    const safeName = path.basename(file.name);
+    const uploadedPath = path.join(tempDirectory, `${randomUUID()}-${safeName}`);
     const audioPath = path.join(tempDirectory, `${randomUUID()}.mp3`);
     await fs.writeFile(uploadedPath, Buffer.from(await file.arrayBuffer()));
 
+    const mediaKind = await detectMediaKind(uploadedPath);
     await validateUploadedMedia(uploadedPath, mediaKind);
     await createTranscriptionAudio(uploadedPath, audioPath);
 

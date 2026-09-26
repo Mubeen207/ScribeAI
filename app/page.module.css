@@ -113,6 +113,12 @@
   transform: translateY(-1px);
 }
 
+.primaryButton:focus-visible,
+.secondaryButton:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 2px;
+}
+
 .primaryButton:disabled,
 .secondaryButton:disabled {
   cursor: not-allowed;

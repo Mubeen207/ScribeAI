@@ -168,7 +168,7 @@ export default function Home() {
       return;
     }
 
-    printWindow.document.write(`
+    const markup = `
       <html>
         <head>
           <title>${escapeHtml(downloadBaseName)}</title>
@@ -178,10 +178,15 @@ export default function Home() {
         </head>
         <body>${escapeHtml(transcript)}</body>
       </html>
-    `);
+    `;
+
+    printWindow.onload = () => {
+      printWindow.focus();
+      printWindow.print();
+    };
+
+    printWindow.document.write(markup);
     printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
   }
 
   return (
