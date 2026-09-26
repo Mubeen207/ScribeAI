@@ -178,15 +178,16 @@ export default function Home() {
           <style>
             body { font-family: Arial, sans-serif; margin: 2rem; line-height: 1.6; white-space: pre-wrap; }
           </style>
+          <script>
+            window.addEventListener("load", () => {
+              window.focus();
+              window.print();
+            });
+          </script>
         </head>
         <body>${escapeHtml(transcript)}</body>
       </html>
     `;
-
-    printWindow.addEventListener("load", () => {
-      printWindow.focus();
-      printWindow.print();
-    });
 
     printWindow.document.write(markup);
     printWindow.document.close();

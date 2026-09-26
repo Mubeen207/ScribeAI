@@ -142,31 +142,6 @@ function runFfmpeg(command: ffmpeg.FfmpegCommand) {
   });
 }
 
-async function validateUploadedMedia(filePath: string, kind: MediaKind) {
-  const metadata = await probe(filePath);
-  const streams = metadata.streams ?? [];
-  const hasAudio = streams.some((stream) => stream.codec_type === "audio");
-  const hasVideo = streams.some((stream) => stream.codec_type === "video");
-
-  if (kind === "audio" && !hasAudio) {
-    throw new ValidationError(
-      "The uploaded file does not contain a valid audio stream.",
-    );
-  }
-
-  if (kind === "video") {
-    if (!hasVideo) {
-      throw new ValidationError(
-        "The uploaded file does not contain a valid video stream.",
-      );
-    }
-
-    if (!hasAudio) {
-      throw new ValidationError("The uploaded video does not contain an audio track.");
-    }
-  }
-}
-
 async function detectMediaKind(filePath: string) {
   const metadata = await probe(filePath);
   const streams = metadata.streams ?? [];
@@ -174,6 +149,10 @@ async function detectMediaKind(filePath: string) {
   const hasVideo = streams.some((stream) => stream.codec_type === "video");
 
   if (hasVideo) {
+    if (!hasAudio) {
+      throw new ValidationError("The uploaded video does not contain an audio track.");
+    }
+
     return "video" as const;
   }
 
@@ -283,8 +262,7 @@ export async function transcribeUpload(file: File) {
     const audioPath = path.join(tempDirectory, `${randomUUID()}.mp3`);
     await fs.writeFile(uploadedPath, Buffer.from(await file.arrayBuffer()));
 
-    const mediaKind = await detectMediaKind(uploadedPath);
-    await validateUploadedMedia(uploadedPath, mediaKind);
+    await detectMediaKind(uploadedPath);
     await createTranscriptionAudio(uploadedPath, audioPath);
 
     const duration = await getAudioDurationSeconds(audioPath);
