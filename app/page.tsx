@@ -53,6 +53,8 @@ export default function Home() {
   const [transcript, setTranscript] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [statusText, setStatusText] = useState("");
+  const [progress, setProgress] = useState(0);
 
   const downloadBaseName = useMemo(() => {
     if (!selectedFile) {
@@ -76,6 +78,8 @@ export default function Home() {
     setIsSubmitting(true);
     setError("");
     setTranscript("");
+    setStatusText("Uploading file...");
+    setProgress(0);
 
     try {
       const formData = new FormData();
@@ -86,16 +90,58 @@ export default function Home() {
         body: formData,
       });
 
-      const result = (await response.json()) as {
-        error?: string;
-        transcript?: string;
-      };
-
-      if (!response.ok || !result.transcript) {
-        throw new Error(result.error ?? "Transcription failed.");
+      if (!response.body) {
+        throw new Error("Streaming responses are not supported by this browser.");
       }
 
-      setTranscript(result.transcript);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalTranscript = "";
+      let streamError = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.trim()) {
+            continue;
+          }
+
+          const update = JSON.parse(line) as {
+            type: "progress" | "complete" | "error";
+            step?: string;
+            percent?: number;
+            transcript?: string;
+            error?: string;
+          };
+
+          if (update.type === "progress") {
+            setStatusText(update.step ?? "");
+            if (typeof update.percent === "number") {
+              setProgress(update.percent);
+            }
+          } else if (update.type === "complete") {
+            finalTranscript = update.transcript ?? "";
+          } else if (update.type === "error") {
+            streamError = update.error ?? "Transcription failed.";
+          }
+        }
+      }
+
+      if (streamError || !finalTranscript) {
+        throw new Error(streamError || "Transcription failed.");
+      }
+
+      setTranscript(finalTranscript);
+      setProgress(100);
     } catch (submitError) {
       setError(
         submitError instanceof Error
@@ -104,6 +150,8 @@ export default function Home() {
       );
     } finally {
       setIsSubmitting(false);
+      setStatusText("");
+      setProgress(0);
     }
   }
 
@@ -230,6 +278,20 @@ export default function Home() {
               {isSubmitting ? "Transcribing..." : "Start transcription"}
             </button>
           </form>
+
+          {isSubmitting ? (
+            <div className={styles.progressWrapper}>
+              <span className={styles.statusBadge}>
+                {statusText || "Starting transcription..."}
+              </span>
+              <div className={styles.progressTrack}>
+                <div
+                  className={styles.progressFill}
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            </div>
+          ) : null}
 
           {error ? (
             <p className={styles.error} role="alert">

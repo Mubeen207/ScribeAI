@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { promises as fs } from "fs";
+import { existsSync, unlinkSync, promises as fs } from "fs";
 import os from "os";
 import path from "path";
 import ffmpeg from "fluent-ffmpeg";
@@ -58,6 +58,11 @@ type MediaKind = "audio" | "video";
 type MediaHint = MediaKind | "ambiguous";
 
 export class ValidationError extends Error {}
+
+export type ProgressCallback = (status: {
+  step: string;
+  percent?: number;
+}) => void;
 
 type FfprobeResult = {
   format?: {
@@ -329,7 +334,26 @@ async function transcribeAudioSegment(
   return result.response.text().trim();
 }
 
-export async function transcribeUpload(file: File) {
+// Deletes each tracked temp file individually (existsSync + unlinkSync guard
+// against "file not found" errors). This guarantees no leftover audio/chunk
+// files remain in /tmp even if FFmpeg or Gemini fails mid-way through
+// processing. The temp directory itself is removed separately afterwards.
+function cleanupTempFiles(filePaths: string[]) {
+  for (const filePath of filePaths) {
+    try {
+      if (existsSync(filePath)) {
+        unlinkSync(filePath);
+      }
+    } catch (cleanupError) {
+      console.error(`Failed to delete temp file "${filePath}":`, cleanupError);
+    }
+  }
+}
+
+export async function transcribeUpload(
+  file: File,
+  onProgress?: ProgressCallback,
+) {
   if (!isAllowedUpload(file.name, file.type)) {
     throw new ValidationError(
       "Unsupported file type. Upload a standard audio or video file.",
@@ -343,38 +367,54 @@ export async function transcribeUpload(file: File) {
   }
 
   const tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "scribeai-"));
+  // Tracks every temp file created during processing so cleanup can happen
+  // reliably in the finally block, regardless of success or failure.
+  const createdFilePaths: string[] = [];
 
   try {
     const safeName = path.basename(file.name);
     const uploadedPath = path.join(tempDirectory, `${randomUUID()}-${safeName}`);
     const audioPath = path.join(tempDirectory, `${randomUUID()}.mp3`);
+    createdFilePaths.push(uploadedPath, audioPath);
     await fs.writeFile(uploadedPath, Buffer.from(await file.arrayBuffer()));
 
     await detectMediaKind(uploadedPath);
+
+    onProgress?.({ step: "Extracting and optimizing media audio..." });
     await createTranscriptionAudio(uploadedPath, audioPath);
 
+    onProgress?.({ step: "Analyzing audio duration and creating segments..." });
     const duration = await getAudioDurationSeconds(audioPath);
     const segments =
       duration <= MAX_SEGMENT_SECONDS
         ? [audioPath]
         : await splitAudio(audioPath, tempDirectory, duration);
+    createdFilePaths.push(...segments);
 
     const client = new GoogleGenerativeAI(apiKey);
     const transcriptParts: string[] = [];
+    const totalChunks = segments.length;
 
-    for (let index = 0; index < segments.length; index += 1) {
+    for (let index = 0; index < totalChunks; index += 1) {
+      onProgress?.({
+        step: `Transcribing chunk ${index + 1} of ${totalChunks} with Gemini AI...`,
+        percent: Math.round(((index + 1) / totalChunks) * 100),
+      });
+
       const transcript = await transcribeAudioSegment(
         client,
         DEFAULT_GEMINI_MODEL,
         segments[index],
         index + 1,
-        segments.length,
+        totalChunks,
       );
 
       if (transcript) {
         transcriptParts.push(transcript);
       }
     }
+
+    onProgress?.({ step: "Combining segment transcripts...", percent: 100 });
 
     if (transcriptParts.length === 0) {
       throw new Error("Gemini did not return a transcript for the uploaded file.");
@@ -385,6 +425,10 @@ export async function transcribeUpload(file: File) {
       transcript: transcriptParts.join("\n\n"),
     };
   } finally {
+    // Explicit per-file cleanup first (guaranteed, even on mid-way FFmpeg or
+    // Gemini failure), then a recursive removal as a final safety net for
+    // anything unexpected left behind in the temp directory.
+    cleanupTempFiles(Array.from(new Set(createdFilePaths)));
     await fs.rm(tempDirectory, { recursive: true, force: true });
   }
 }
