@@ -18,6 +18,12 @@ const MAX_SEGMENT_SECONDS = 15 * 60;
 const TRANSCRIPTION_MIME_TYPE = "audio/mpeg";
 const DEFAULT_GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
 
+// Models to fall back to (in order) if the primary model keeps returning 503s.
+const FALLBACK_GEMINI_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash"];
+
+// Exponential backoff delays between retries of the same model.
+const RETRY_DELAYS_MS = [2000, 4000, 8000];
+
 const AUDIO_EXTENSIONS = new Set([
   ".mp3",
   ".wav",
@@ -221,9 +227,91 @@ async function splitAudio(audioPath: string, tempDirectory: string, duration: nu
   return segments;
 }
 
-async function transcribeAudioSegment(model: ReturnType<GoogleGenerativeAI["getGenerativeModel"]>, audioPath: string, segmentNumber: number, totalSegments: number) {
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Detects the "model overloaded" family of errors the Gemini API returns
+// (HTTP 503, or messages mentioning overload/high demand/unavailability).
+function isRetryableGeminiError(error: unknown): boolean {
+  const status =
+    (error as { status?: number } | undefined)?.status ??
+    (error as { httpStatus?: number } | undefined)?.httpStatus;
+
+  if (status === 503) {
+    return true;
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  return /\b503\b|service unavailable|overloaded|high demand|unavailable/i.test(
+    message,
+  );
+}
+
+// Sends a generateContent request, retrying the same model with exponential
+// backoff on 503/overloaded errors, then falling back to alternate models
+// (in order) once retries on a model are exhausted. Non-retryable errors are
+// thrown immediately without retrying or falling back.
+async function generateContentWithFallback(
+  client: GoogleGenerativeAI,
+  primaryModel: string,
+  parts: Parameters<
+    ReturnType<GoogleGenerativeAI["getGenerativeModel"]>["generateContent"]
+  >[0],
+) {
+  const modelsToTry = Array.from(
+    new Set([primaryModel, ...FALLBACK_GEMINI_MODELS]),
+  );
+
+  let lastError: unknown;
+
+  for (const modelName of modelsToTry) {
+    const model = client.getGenerativeModel({ model: modelName });
+
+    for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+      try {
+        return await model.generateContent(parts);
+      } catch (error) {
+        lastError = error;
+        console.error(
+          `Gemini request failed (model=${modelName}, attempt=${attempt + 1}/${
+            RETRY_DELAYS_MS.length + 1
+          }):`,
+          error,
+        );
+
+        if (!isRetryableGeminiError(error)) {
+          throw error;
+        }
+
+        const isLastAttemptForModel = attempt === RETRY_DELAYS_MS.length;
+        if (!isLastAttemptForModel) {
+          await sleep(RETRY_DELAYS_MS[attempt]);
+        }
+      }
+    }
+
+    console.warn(
+      `Gemini model "${modelName}" is unavailable after ${
+        RETRY_DELAYS_MS.length + 1
+      } attempts. Falling back to the next model, if any.`,
+    );
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Gemini API request failed after retries and fallbacks.");
+}
+
+async function transcribeAudioSegment(
+  client: GoogleGenerativeAI,
+  primaryModel: string,
+  audioPath: string,
+  segmentNumber: number,
+  totalSegments: number,
+) {
   const audioBuffer = await fs.readFile(audioPath);
-  const result = await model.generateContent([
+  const result = await generateContentWithFallback(client, primaryModel, [
     {
       text:
         totalSegments > 1
@@ -272,12 +360,12 @@ export async function transcribeUpload(file: File) {
         : await splitAudio(audioPath, tempDirectory, duration);
 
     const client = new GoogleGenerativeAI(apiKey);
-    const model = client.getGenerativeModel({ model: DEFAULT_GEMINI_MODEL });
     const transcriptParts: string[] = [];
 
     for (let index = 0; index < segments.length; index += 1) {
       const transcript = await transcribeAudioSegment(
-        model,
+        client,
+        DEFAULT_GEMINI_MODEL,
         segments[index],
         index + 1,
         segments.length,
